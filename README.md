@@ -1,7 +1,6 @@
-##School bot by ZigCat and Bogdan Pronin
+## School bot by ZigCat and Bogdan Pronin
 
-now it's just file transfer bot
+now you can write Hometask object to database from telegram bot
 
 > commands:
-> - `send file_name` - receive file with file_name from server
-> - upload file - uploading file to server
+> `/posthometask` - initializing post hometask. Next you need to follow bot's instructions.
