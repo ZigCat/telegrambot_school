@@ -1,6 +1,7 @@
 package com.github.bagasala;
 
 import com.github.bagasala.ormlite.models.*;
+import com.github.bagasala.ormlite.services.DateService;
 import com.github.bagasala.ormlite.services.HometaskService;
 import com.github.bagasala.ormlite.services.SubjectService;
 import com.j256.ormlite.dao.Dao;
@@ -32,14 +33,18 @@ import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class Bot extends TelegramLongPollingBot {
     private static Logger l = LoggerFactory.getLogger(Bot.class);
     public static Dao<Hometask, Integer> hometaskDao;
     public static Dao<Subject,Integer> subjectDao;
-    private int postPhase;
-    private Hometask hometask;
+    private Map<String, Integer> map = new HashMap<>();
+    private Map<String, Hometask> hometasks = new HashMap<>();
+
+
 
     static {
         try {
@@ -64,13 +69,14 @@ public class Bot extends TelegramLongPollingBot {
     }
 
     public void onUpdateReceived(Update update) {
-        Message message = update.getMessage();
+
         LocalTime localTime = LocalTime.now();
         SendMessage sendMessage = new SendMessage();
 
         try {
             //notification();
             addTeacherInterface(update);
+            addStudentInterface(update);
         } catch (IOException | SQLException e) {
             e.printStackTrace();
         }
@@ -191,6 +197,7 @@ public class Bot extends TelegramLongPollingBot {
     public String getDirPath(){
         return "C:\\Users\\MI\\Desktop\\telegram bot\\";
     }
+
     public void setScheduleButtons(SendMessage message,long chat_id){
         message.setChatId(chat_id)
                 .setText("Выберите день недели");
@@ -241,6 +248,7 @@ public class Bot extends TelegramLongPollingBot {
         KeyboardRow keyboardFirstRow = new KeyboardRow();
 
         keyboardFirstRow.add(new KeyboardButton("/posthometask"));
+        keyboardFirstRow.add(new KeyboardButton("/homework"));
         keyboardFirstRow.add(new KeyboardButton("/schedule"));
         keyboardRowList.add(keyboardFirstRow);
         replyKeyboardMarkup.setKeyboard(keyboardRowList);
@@ -264,20 +272,18 @@ public class Bot extends TelegramLongPollingBot {
     }
     public void download(Message message, String file_name){
         SendDocument sendDocument = new SendDocument();
-        sendDocument.setNewDocument(new File(getDirPath()+file_name));
+        sendDocument.setNewDocument(new File(file_name));
         sendDocument.setChatId(message.getChatId());
-        sendDocument.setCaption(file_name);
         try {
             sendDocument(sendDocument);
-            sendMsg(message, "success output");
             l.info("@@@\tsent file "+file_name);
         } catch (TelegramApiException e) {
-            sendMsg(message, "fail output");
+            e.printStackTrace();
         }
     }
 
     public void uploadFile(String file_name, String file_id) throws IOException{
-        l.info("@@@\tdownloading file " + file_name + "to server");
+        l.info("@@@\tdownloading file " + file_name + " to server");
         URL url = new URL("https://api.telegram.org/bot"+getBotToken()+"/getFile?file_id="+file_id);
         BufferedReader in = new BufferedReader(new InputStreamReader( url.openStream()));
         String res = in.readLine();
@@ -295,54 +301,116 @@ public class Bot extends TelegramLongPollingBot {
         l.info("@@@\tfile downloaded on server(success)");
     }
 
-    public void addTeacherInterface(Update update) throws SQLException, IOException {
+    public void addStudentInterface(Update update) throws SQLException {
         if(update.hasMessage()){
             Message message = update.getMessage();
+            Long chId = message.getChatId();
+            String chatId = chId.toString()+"stud";
             if(message.hasText()){
-                if(message.getText().equals("/posthometask")){
-                    l.info("@posting hometask initialized");
-                    postPhase = 1;
-                    hometask = new Hometask();
-                    hometask.setId(1);
-                    sendMsg(message, "Введите название предмета");
-                } else if(postPhase == 1){
-                    String text = message.getText();
-                    l.info("@getting subject's name from client");
-                    if(SubjectService.getSubjectByName(text) != null){
-                        l.info("@setting subject to hometask");
-                        hometask.setSubject(SubjectService.getSubjectByName(text));
-                        postPhase = 2;
-                        sendMsg(message, "Установлен предмет: "+text+".\nВведите описание домашнего задания");
-                    } else {
-                        l.info("client sent wrong subject");
-                        sendMsg(message, "Неправильное название предмета, повторите попытку");
+                if(message.getText().equals("/homework")){
+                    sendMsg(message, "Введите предмет, по которому хотите получить домашнее задание");
+                    l.info("@getting hometask initialized, chatId = "+chatId);
+                    map.put(chatId, 1);
+                    hometasks.put(chatId, new Hometask());
+                } else if(map.containsKey(chatId)){
+                    if(map.get(chatId) == 1){
+                        l.info("@getting subject name from client, chatId = "+chatId);
+                        String text = message.getText();
+                        if(SubjectService.getSubjectByName(text) == null){
+                            l.info("client sent wrong subject");
+                            sendMsg(message, "Неправильное название предмета, повторите попытку");
+                        } else {
+                            l.info("@setting hometask's subject, chatId = "+chatId);
+                            hometasks.get(chatId).setSubject(SubjectService.getSubjectByName(text));
+                            hometasks.get(chatId).setId(1);
+                            map.put(chatId, 2);
+                            sendMsg(message, "Установлен предмет: "+text+"\nВведите дату домашнего задания в формате ГГГГ ММ ДД");
+                        }
+                    } else if(map.get(chatId) == 2){
+                        l.info("@getting homework's date, chatId = "+chatId);
+                        String date = message.getText();
+                        if(DateService.isValidDate(date)){
+                            l.info("@setting hometask's date, chatId = "+chatId);
+                            hometasks.get(chatId).setDate(date);
+                            Hometask hometask = HometaskService.getByParams(hometasks.get(chatId).getDate(), hometasks.get(chatId).getSubject());
+                            if(hometask == null){
+                                l.info("@hometask isn't exists, try again");
+                                sendMsg(message, "Домашки не существует, повторите попытку снова");
+                            } else {
+                                sendMsg(message, "Отлично, отправляем домашнее задание!");
+                                Runnable task = () -> {
+                                    download(message, hometask.getFilePath());
+                                };
+                                Thread thread = new Thread(task);
+                                thread.start();
+                                sendMsg(message, "комментарии учителя: "+hometask.getDescription());
+                                hometasks.remove(chatId);
+                                map.remove(chatId);
+                                l.info("@hometask sending cycle ended");
+                            }
+                        }
                     }
-                } else if(postPhase == 2){
-                    l.info("@get hometask's description from client");
-                    String desc = message.getText();
-                    hometask.setDescription(desc);
-                    sendMsg(message, "Отлично, теперь отправьте нам файл с домашним заданием");
-                    postPhase = 3;
                 }
-            } else if(message.hasDocument()){
-                if(postPhase == 3){
-                    l.info("@get file from client");
+            }
+        }
+    }
+
+    public void addTeacherInterface(Update update) throws SQLException, IOException {
+        if (update.hasMessage()) {
+            Message message = update.getMessage();
+            Long chId = message.getChatId();
+            String chatId = chId.toString()+"teach";
+            if (message.hasText()) {
+                if (message.getText().equals("/posthometask")) {
+                    l.info("@posting hometask initialized, chatId = "+chatId);
+                    map.put(chatId, 1);
+                    hometasks.put(chatId, new Hometask());
+                    sendMsg(message, "Введите название предмета");
+                } else if (map.containsKey(chatId)) {
+                    if (map.get(chatId) == 1) {
+                        String text = message.getText();
+                        l.info("@getting subject's name from client chatId = "+chatId);
+                        if (SubjectService.getSubjectByName(text) != null) {
+                            l.info("@setting subject to hometask chatId = "+chatId);
+                            hometasks.get(chatId).setId(1);
+                            hometasks.get(chatId).setSubject(SubjectService.getSubjectByName(text));
+                            map.put(chatId, 2);
+                            sendMsg(message, "Установлен предмет: " + text + ".\nВведите комментарий к домашнему заданию");
+                        } else {
+                            l.info("client sent wrong subject");
+                            sendMsg(message, "Неправильное название предмета, повторите попытку");
+                        }
+                    } else if (map.get(chatId) == 2) {
+                        l.info("@get hometask's description from client chatId = "+chatId);
+                        String desc = message.getText();
+                        hometasks.get(chatId).setDescription(desc);
+                        sendMsg(message, "Отлично, теперь отправьте нам файл с домашним заданием");
+                        map.put(chatId, 3);
+                    }
+                }
+            } else if (message.hasDocument()) {
+                if (map.get(chatId) == 3) {
+                    l.info("@get file from client chatId = "+chatId);
                     String fileName = message.getDocument().getFileName();
                     String fileId = message.getDocument().getFileId();
-                    if(HometaskService.isFilePathExist(getDirPath()+fileName)){
-                        l.info("wrong file name");
-                        sendMsg(message, "Файл с таким именем уже существует в базе, переименуйте свой и попробуйте еще раз");
-                    } else {
-                        l.info("@setting file to hometask");
-                        uploadFile(fileName, fileId);
-                        hometask.setFilePath(getDirPath()+hometask.getSubject()+"\\"+fileName);
-                        hometask.setDate(LocalDate.now().format(Hometask.dateTimeFormatter));
-                        hometaskDao.create(hometask);
-                        l.info("@hometask object was created");
-                        postPhase = 0;
-                        sendMsg(message, "Отлично! Домашнее задание занесено сегодняшним числом в базу!");
-                        l.info("@hometask creating cycle ended");
-                    }
+                    Runnable task = () -> {
+                        try {
+                            uploadFile(hometasks.get(chatId).getSubject().getName() + "\\" + fileName, fileId);
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    };
+                    Thread thread = new Thread(task);
+                    thread.start();
+                    l.info("@setting file to hometask");
+                    hometasks.get(chatId).setFilePath(getDirPath() + hometasks.get(chatId).getSubject().getName() + "\\" + fileName);
+                    hometasks.get(chatId).setDate(LocalDate.now().format(Hometask.dateTimeFormatter));
+                    hometaskDao.create(hometasks.get(chatId));
+                    l.info("@hometask object was created");
+                    map.remove(chatId);
+                    hometasks.remove(chatId);
+                    sendMsg(message, "Отлично! Домашнее задание занесено сегодняшним числом в базу!");
+                    l.info("@hometask creating cycle ended");
                 }
             }
         }
@@ -350,12 +418,12 @@ public class Bot extends TelegramLongPollingBot {
 
     public String getBotUsername() {
         //put here your own bot's username
-        return "@";
+        return "@StudyControlBot";
     }
 
     public String getBotToken() {
         //put here your own bot's token
-        return "";
+        return "1213409409:AAEpGc8wuxiF-TRbdKFmyZEy7ltsfFnuBfo";
     }
 //    private void log(String first_name, String last_name, String user_id, String txt, String bot_answer) {
 //        System.out.println("\n ----------------------------");
