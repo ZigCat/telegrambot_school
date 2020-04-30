@@ -23,24 +23,29 @@ public class Hometask {
     @DatabaseField
     private String date;
 
+    @DatabaseField
+    private String deadLine;
+
     public static DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern("YYYY MM dd");
 
     public Hometask(){}
 
-    public Hometask(int id, String filePath, String description, Subject subject, LocalDate date) {
+    public Hometask(int id, String filePath, String description, Subject subject, LocalDate date, LocalDate deadLine) {
         this.id = id;
         this.filePath = filePath;
         this.description = description;
         this.subject = subject;
         this.date = date.format(dateTimeFormatter);
+        this.deadLine = deadLine.format(dateTimeFormatter);
     }
 
-    public Hometask(int id, String filePath, String description, Subject subject, String date) {
+    public Hometask(int id, String filePath, String description, Subject subject, String date, String deadLine) {
         this.id = id;
         this.filePath = filePath;
         this.description = description;
         this.subject = subject;
         this.date = date;
+        this.deadLine = deadLine;
     }
 
     @Override
@@ -91,5 +96,13 @@ public class Hometask {
 
     public void setDate(String date) {
         this.date = date;
+    }
+
+    public String getDeadLine() {
+        return deadLine;
+    }
+
+    public void setDeadLine(String deadLine) {
+        this.deadLine = deadLine;
     }
 }

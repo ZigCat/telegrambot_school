@@ -15,4 +15,13 @@ public class SubjectService {
         }
         return null;
     }
+
+    public static Subject getSubjectById(int id) throws SQLException {
+        for(Subject s: Bot.subjectDao.queryForAll()){
+            if(s.getId() == id){
+                return s;
+            }
+        }
+        return null;
+    }
 }

@@ -9,13 +9,14 @@ import com.j256.ormlite.table.TableUtils;
 import java.sql.SQLException;
 
 public class DatabaseConfiguration {
-    private static final String DB_URL = "jdbc:mysql://localhost:3306/telegram_bot?useUnicode=true&useJDBCCompliantTimezoneShift=true&useLegacyDatetimeCode=false&serverTimezone=UTC";
+    private static final String DB_URL_MYSQL = "jdbc:mysql://localhost:3306/telegram_bot?useUnicode=true&useJDBCCompliantTimezoneShift=true&useLegacyDatetimeCode=false&serverTimezone=UTC";
+    private static final String DB_URL_SQLITE = "jdbc:sqlite:C:/Users/MI/Desktop/telegram bot/mncDB.db";
     private static final String DB_LOGIN = "root";
     private static final String DB_PASSWORD = "";
     public static ConnectionSource connectionSource;
     static {
         try{
-            connectionSource = new JdbcConnectionSource(DB_URL, DB_LOGIN, DB_PASSWORD);
+            connectionSource = new JdbcConnectionSource(DB_URL_SQLITE);
             TableUtils.createTableIfNotExists(connectionSource, UserDb.class);
             TableUtils.createTableIfNotExists(connectionSource, Subject.class);
             TableUtils.createTableIfNotExists(connectionSource, Group.class);
