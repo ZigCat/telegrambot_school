@@ -1,15 +1,11 @@
 package com.github.bagasala;
 
 import com.github.bagasala.ormlite.models.*;
-import com.github.bagasala.ormlite.services.DateService;
-import com.github.bagasala.ormlite.services.GroupService;
-import com.github.bagasala.ormlite.services.HometaskService;
-import com.github.bagasala.ormlite.services.SubjectService;
+import com.github.bagasala.ormlite.services.*;
 import com.j256.ormlite.dao.Dao;
 import com.j256.ormlite.dao.DaoManager;
 import com.j256.ormlite.logger.Logger;
 import com.j256.ormlite.logger.LoggerFactory;
-import org.apache.poi.hssf.usermodel.HSSFWorkbook;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.ss.usermodel.Row;
@@ -31,13 +27,11 @@ import org.telegram.telegrambots.bots.TelegramLongPollingBot;
 import org.telegram.telegrambots.exceptions.TelegramApiException;
 import org.telegram.telegrambots.exceptions.TelegramApiRequestException;
 
-import javax.validation.constraints.Null;
 import java.io.*;
 import java.net.URL;
 import java.net.URLConnection;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
-import java.sql.Array;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.LocalTime;
@@ -50,13 +44,18 @@ public class Bot extends TelegramLongPollingBot {
     public static Dao<Group, Integer> groupDao;
     public static Dao<Schedule, Integer> scheduleDao;
     public static Dao<Controls, Integer> controlsDao;
+    public static Dao<UserDb, Integer> userDao;
+    public static Dao<Attendance, Integer> attendanceDao;
     private Map<String, Integer> map = new HashMap<>();
     private Map<String, Hometask> hometasks = new HashMap<>();
+    private Map<String, String> dates = new HashMap<>();
 
 
 
     static {
         try {
+            attendanceDao = DaoManager.createDao(DatabaseConfiguration.connectionSource, Attendance.class);
+            userDao = DaoManager.createDao(DatabaseConfiguration.connectionSource, UserDb.class);
             subjectDao = DaoManager.createDao(DatabaseConfiguration.connectionSource,Subject.class);
             hometaskDao = DaoManager.createDao(DatabaseConfiguration.connectionSource, Hometask.class);
             groupDao = DaoManager.createDao(DatabaseConfiguration.connectionSource, Group.class);
@@ -90,6 +89,8 @@ public class Bot extends TelegramLongPollingBot {
             addStudentInterface(update);
             readSchedule(update);
             readControlGraph(update);
+            readAttendance(update);
+            sendAttendance(update);
         } catch (IOException | SQLException e) {
             e.printStackTrace();
         }
@@ -207,9 +208,6 @@ public class Bot extends TelegramLongPollingBot {
         }
     }
 
-    public String getDirPath(){
-        return "C:\\Users\\MI\\Desktop\\telegram bot\\";
-    }
 
     public void setScheduleButtons(SendMessage message,long chat_id){
         message.setChatId(chat_id)
@@ -294,7 +292,6 @@ public class Bot extends TelegramLongPollingBot {
             e.printStackTrace();
         }
     }
-
     public void uploadFile(String file_name, String file_id) throws IOException{
         l.info("@@@\tdownloading file " + file_name + " to server");
         URL url = new URL("https://api.telegram.org/bot"+getBotToken()+"/getFile?file_id="+file_id);
@@ -312,6 +309,38 @@ public class Bot extends TelegramLongPollingBot {
         fos.close();
         rbc.close();
         l.info("@@@\tfile downloaded on server(success)");
+    }
+    public String getDirPath(){
+        return "C:\\Users\\MI\\Desktop\\telegram bot\\";
+    }
+
+    public void help(Update update){
+        if(update.hasMessage()){
+            Message message = update.getMessage();
+            if(message.hasText()){
+                if(message.getText().equals("/help")){
+                    l.info("@sending help message to client");
+                    sendMsg(message, "Данный бот имеет интерфейс как для простого ученика, так для учителя и администратора.\n" +
+                            "\n" +
+                            "Интерфейс ученика\uD83E\uDD13:\n" +
+                            "\n" +
+                            "/homework - запрос домашнего задания на введенную дату.\n" +
+                            "/controls - запрос контрольных и самостоятельных работ на текущую, следующую неделю и за все время.\n" +
+                            "/schedule - просмотр расписания по введенному дню недели.\n" +
+                            "\n" +
+                            "Интерфейс учителя\uD83D\uDE01:\n" +
+                            "\n" +
+                            "/posthometask - добавление в базу домашнего задания на дату.\n" +
+                            "/postcontrol - добавление в базу графика контрольных работ с помощью Excel файла.\n" +
+                            "\n" +
+                            "Интерфейс администратора\uD83D\uDE08:\n" +
+                            "\n" +
+                            "/postschedule - добавление в базу расписания с помощью Excel файла.\n" +
+                            "\n" +
+                            "Также этот бот\uD83E\uDD16 автоматически оповещает Вас о контрольных работах за день до их проведения. Каждый вечер бот, заботясь о Вас \uD83D\uDE0A, уведомляет о том, что необходимо собрать рюкзак\uD83C\uDF92,и для удобства отправляет расписание на следующий день.");
+                }
+            }
+        }
     }
 
     public void addStudentInterface(Update update) throws SQLException {
@@ -499,6 +528,91 @@ public class Bot extends TelegramLongPollingBot {
         }
     }
 
+    public void readAttendance(Update update) throws IOException, SQLException {
+        if(update.hasMessage()){
+            Message message = update.getMessage();
+            String chatId = message.getChatId().toString()+"attend";
+            if(message.hasText()){
+                String text = message.getText();
+                if(text.equals("/postattendance")){
+                    l.info("@posting attendance initialized, chatId = "+chatId);
+                    map.put(chatId, 1);
+                    sendMsg(message, "Отправьте нам Excel файл в нужном формате. Для того, чтобы узнать, в каком формате нужно отправлять Excel файл, введите /postattendancehelp");
+                } else if(text.equals("/postattendancehelp")){
+                    l.info("@sending Excel attendance example to client, chatId = "+chatId);
+                    download(message, getDirPath()+"examples\\attendance.xlsx");
+                }
+            } else if(message.hasDocument()){
+                if(map.containsKey(chatId)){
+                    if(map.get(chatId) == 1){
+                        l.info("@getting file from client, chatId = "+chatId);
+                        uploadFile("controls\\"+message.getDocument().getFileName(), message.getDocument().getFileId());
+                        File file = new File(getDirPath()+"controls\\"+message.getDocument().getFileName());
+                        try{
+                            attendanceDao.create(parceAttendanceExcel(file));
+                            sendMsg(message, "Файл был успешно загружен и прочитан");
+                        } catch (IndexOutOfBoundsException | NullPointerException e){
+                            e.printStackTrace();
+                            sendMsg(message,"Ошибка при считывании файла, повторите попытку");
+                        } finally {
+                            map.remove(chatId);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    public void sendAttendance(Update update) throws SQLException {
+        if(update.hasMessage()){
+            Message message = update.getMessage();
+            String chatId = message.getChatId().toString()+"sndatt";
+            if(message.hasText()){
+                String text = message.getText();
+                if(text.equals("/attendance")){
+                    l.info("@getting attendace initialized, chatId = "+chatId);
+                    map.put(chatId, 1);
+                    sendMsg(message, "Отправьте нам дату, на которую хотите получить посещаемость, в формате ГГГГ ММ ДД");
+                } else if(map.containsKey(chatId)){
+                    if(map.get(chatId) == 1){
+                        l.info("@getting date from client, chatId = "+chatId);
+                        if(DateService.isValidDate(text)){
+                            l.info("@setting date");
+                            dates.put(chatId, text);
+                            map.put(chatId, 2);
+                            sendMsg(message, "Отлично, теперь укажите класс, по которому хотите получить посещаемость");
+                        } else {
+                            l.info("@error whlie receiving date");
+                            sendMsg(message, "Неправильный формат даты, повторите попытку");
+                        }
+                    } else if(map.get(chatId) == 2){
+                        l.info("@getting group from client, chatId = "+chatId);
+                        Group group = GroupService.getGroupByName(text);
+                        if(group != null){
+                            l.info("@getting attendances");
+                            sendMsg(message, "Отлично, отправляем вам посещаемость учеников");
+                            for(Attendance a:attendanceDao.queryForAll()){
+                                if(a.getDate().equals(dates.get(chatId)) && a.getGroup().getGroupName().equalsIgnoreCase(group.getGroupName())){
+                                    if(a.isAttends()){
+                                        sendMsg(message, a.getUser().getLname()+": присутствовал");
+                                    } else {
+                                        sendMsg(message, a.getUser().getLname()+": отсутствовал");
+                                    }
+                                }
+                            }
+                            map.remove(chatId);
+                            dates.remove(chatId);
+                            l.info("@ending attendance cycle");
+                        } else {
+                            sendMsg(message, "Группы не существует, повторите попытку");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+
     public ArrayList<Schedule> parceScheduleExcel(File excel) throws IOException, SQLException {
         l.info("@@@start parcing excel file");
         ArrayList<Double> startOfLesson = new ArrayList<>();
@@ -629,6 +743,55 @@ public class Bot extends TelegramLongPollingBot {
         }
         l.info("@@@parcing done");
         return controls;
+    }
+
+    public ArrayList<Attendance> parceAttendanceExcel(File excel) throws IOException, SQLException {
+        ArrayList<String> names = new ArrayList<>();
+        ArrayList<String> date = new ArrayList<>();
+        ArrayList<String> status = new ArrayList<>();
+        ArrayList<Attendance> attendances = new ArrayList<>();
+        FileInputStream fileInputStream = new FileInputStream(excel);
+        XSSFWorkbook workbook = new XSSFWorkbook(fileInputStream);
+        XSSFSheet sheet = workbook.getSheetAt(0);
+        Iterator<Row> rowIterator = sheet.iterator();
+        int position, rowCounter = 1;
+        while(rowIterator.hasNext()){
+            Row row = rowIterator.next();
+            Iterator<Cell> cellIterator = row.iterator();
+            position = 1;
+            while(cellIterator.hasNext()){
+                Cell cell = cellIterator.next();
+                if(rowCounter == 1){
+                    if(cell.getCellType() == CellType.STRING){
+                        l.info("dates "+cell.getStringCellValue());
+                        if(!cell.getStringCellValue().equals("name")){
+                            date.add(cell.getStringCellValue());
+                        }
+                    }
+                } else {
+                    if(position == 1){
+                        l.info("names "+cell.getStringCellValue());
+                        names.add(cell.getStringCellValue());
+                    } else {
+                        l.info("isAttend "+cell.getStringCellValue());
+                        status.add(cell.getStringCellValue());
+                    }
+                }
+                position ++;
+            }
+            rowCounter++;
+        }
+        UserDb u;
+        boolean isAttend;
+        for(int i=0;i<names.size();i++){
+            for(int j=0;j<date.size();j++){
+                u = UserService.getByLName(names.get(i));
+                isAttend = status.get(j).equals("-");
+                attendances.add(new Attendance(u, GroupService.getByUser(u), date.get(j), isAttend));
+            }
+        }
+        l.info("@@@parcing done");
+        return attendances;
     }
 
     public String getBotUsername() {
