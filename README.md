@@ -1,4 +1,4 @@
-## School telegram bot by ZigCat and Bogdan Pronin
+# School telegram bot by Kazakpayev Solomon and Bogdan Pronin
 
 Данный бот имеет интерфейс как для простого ученика, так для учителя и администратора.
 
